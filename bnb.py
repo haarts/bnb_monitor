@@ -1,4 +1,5 @@
 from bs4 import BeautifulSoup
+import datetime
 import json
 import datetime
 import urllib.request
@@ -13,17 +14,17 @@ def get(url, fname):
 	subprocess.run(["curl", "--location", "--silent", url], stdout=f)
 
 def extract_bnb_info(raw_bnb):
-	#print(raw_bnb)
+	# print(raw_bnb)
 	bnb = {}
-	bnb['link'] = "https://www.bedandbreakfast.nl"+raw_bnb.find("a")['href']
-	rooms = raw_bnb.find("div", class_="bb_rechts").find("div", string = re.compile("Kamers")).string
-	bnb['rooms'] = int(rooms.replace(" Kamers", ""))
+	bnb['link'] = "https://www.bedandbreakfast.nl"+raw_bnb['href']
+	# rooms = raw_bnb.find("div", class_="bb_rechts").find("div", string = re.compile("Kamers")).string
+	# bnb['rooms'] = int(rooms.replace(" Kamers", ""))
 	return bnb
 
 
 def one_page(url):
 	print(url)
-	req = urllib.request.Request("https://www.bedandbreakfast.nl"+url)
+	req = urllib.request.Request(url)
 	req.add_header('User-Agent', 'prive crawler (Python3, urllib), harm@mindshards.com')
 	with urllib.request.urlopen(req) as response:
 		return extract_bnbs(response)
@@ -34,11 +35,15 @@ def extract_bnbs(content):
 	soup = BeautifulSoup(html,'html.parser')
 
 	# find bnbs
-	bnbs = soup.find('div', id='resultaten').find_all("div", recursive=False)[1:-1]
-	bnbs = [extract_bnb_info(bnb) for bnb in bnbs]
+	bnbs = soup.find('div', class_='first_results').find_all("a")
+	# this list contains #review links too
+	clean = [href for href in bnbs if re.search("review|detail_map", href['href']) == None]
+
+	bnbs = [extract_bnb_info(bnb) for bnb in clean]
 	return bnbs
 
 
+# main function to get all BNBs in an area, used only once.
 def online_bnbs():
 	# bnbURL = "https://www.bedandbreakfast.nl/bed-and-breakfast-nl/utrecht/provincie/nederland/2745909"
 	bnbURL = "https://www.bedandbreakfast.nl/bed-and-breakfast-nl/utrecht/nederland/c2745912"
@@ -50,17 +55,21 @@ def online_bnbs():
 		html = response.read()
 		soup = BeautifulSoup(html,'html.parser')
 
-		# find the pagination item
-		pages = soup.find('div', id='resultaten').find_all("div", recursive=False)[-1].find_all("a")
-		hrefs = [page['href'] for page in pages]
+		# find the pagination item, subtract 2 for the begin and end arrow
+		pages = len(soup.find('div', class_='pageNrContainer').find_all("span")) -2
+		hrefs = [bnbURL + "?pagenr="+ str(page+1) for page in range(pages)]
 
-		bnbs = [one_page(href) for href in hrefs[0:-1]]
+		bnbs = [one_page(href) for href in hrefs]
+		print("bnbs:")
+		print(bnbs)
 		flattened = [item for sublist in bnbs for item in sublist]
+		print("flattened:")
+		print(flattened)
 		with open('bnbs.csv', 'w', newline='') as csvfile:
-			fieldnames = ['link', 'rooms']
+			fieldnames = ['link']
 			writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 			writer.writeheader()
-			for bnb in bnbs:
+			for bnb in flattened:
 				writer.writerow(bnb)
 
 def from_file_bnbs():
@@ -77,12 +86,10 @@ def from_file_bnbs():
 			writer.writerow(bnb)
 
 def get_calendar_data():
-	with open('bnbs.csv', newline='') as csvfile:
-		import datetime
-		spamreader = csv.reader(csvfile)
-		for row in spamreader:
-			id = re.search("(\d+)\/$", row[0]).group(1)
-			rooms = row[1]
+	with open('clean_bnbs.csv', newline='') as f:
+		lines = f.readlines()
+		for line in lines:
+			id = re.search("(\d+)\/$", line.rstrip()).group(1)
 			url = "https://www.bedandbreakfast.nl/getdataforcalendar?id="+id+"&new=1&year1=2015&month1=11&year2=2016&month2=11"
 			get(url, id)
 			rate = occupancy_rate(id)
@@ -119,9 +126,8 @@ def occupancy_rate(id):
 
 	return 0.0
 
-#print(occupancy_rate("9786"))
-# get_calendar_data()
+# print(occupancy_rate("4470"))
+get_calendar_data()
 #from_file_bnbs()
-list_all_bnbs()
-
+# online_bnbs()
 
